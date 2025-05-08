@@ -1,0 +1,22 @@
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.csv
+
+# Jupyter notebooks and checkpoints
+*.ipynb
+.ipynb_checkpoints/
+
+# Environment folders (don't include your venv or conda envs)
+env/
+venv/
+gpu_env/
+
+# OS files
+.DS_Store
+
+# Logs or temporary files
+*.log
+*.tmp
