@@ -1,11 +1,13 @@
-streamlit
-joblib
-pandas
-wordcloud
-textblob
-numpy
-matplotlib
-seaborn
-nltk
-xgboost
-scikit-learn
+streamlit>=1.25
+joblib>=1.2
+scikit-learn>=1.2
+numpy>=1.23
+pandas>=1.5
+
+# The following are only needed for notebook/EDA, not required at runtime
+# wordcloud
+# textblob
+# matplotlib
+# seaborn
+# nltk
+# xgboost

@@ -1,7 +1,7 @@
 import streamlit as st
 import joblib
 import re
-import pandas as pd
+import os
 
 # Set up the page
 st.set_page_config(
@@ -25,16 +25,28 @@ COLORS = {
 
 # Load models
 @st.cache_resource()
-@st.cache_resource()
 def load_models():
-    return {
-        'sentiment': joblib.load('models/sentiment_model.pkl'),
-        'review_type': joblib.load('models/reviewtype_model.pkl'),
-        'product_category': joblib.load('models/department_model.pkl'),
-        'topic_mapping': joblib.load('models/topic_category_mapping.pkl'),
-        'review_keywords': joblib.load('models/reviewtype_keywords.pkl'),
-        'vectorizer': joblib.load('models/vectorizer.pkl')
+    """Load available models from the models directory with graceful fallbacks."""
+
+    def try_load(path: str):
+        try:
+            if os.path.exists(path):
+                return joblib.load(path)
+        except Exception:
+            return None
+        return None
+
+    models = {
+        'sentiment': try_load('models/sentiment_model.pkl'),
+        'review_type': try_load('models/reviewtype_model.pkl'),
+        # Product category model is optional (may not be present)
+        'product_category': try_load('models/department_model.pkl'),
+        'topic_mapping': try_load('models/topic_category_mapping.pkl'),
+        'review_keywords': try_load('models/reviewtype_keywords.pkl'),
+        'vectorizer': try_load('models/vectorizer.pkl'),
     }
+
+    return models
 
 def clean_text(text):
     text = str(text).lower()
@@ -100,10 +112,27 @@ def main():
             models = load_models()
             cleaned_text = clean_text(review)
             
-            # Get predictions
-            sentiment = models['sentiment'].predict([cleaned_text])[0]
-            review_type = models['review_type'].predict([cleaned_text])[0]
-            category = models['product_category'].predict([cleaned_text])[0]
+            # Get predictions (graceful fallbacks if models missing)
+            sentiment = None
+            review_type = None
+            category = None
+
+            with st.spinner('Running analysis...'):
+                if models.get('sentiment') is not None:
+                    try:
+                        sentiment = models['sentiment'].predict([cleaned_text])[0]
+                    except Exception:
+                        sentiment = None
+                if models.get('review_type') is not None:
+                    try:
+                        review_type = models['review_type'].predict([cleaned_text])[0]
+                    except Exception:
+                        review_type = None
+                if models.get('product_category') is not None:
+                    try:
+                        category = models['product_category'].predict([cleaned_text])[0]
+                    except Exception:
+                        category = None
             
             # Display basic results
             st.markdown("---")
@@ -120,7 +149,7 @@ def main():
                 '>
                     <h3 style='color: {COLORS['primary']}; margin-top: 0;'>Sentiment</h3>
                     <p style='font-size: 24px; font-weight: bold; color: {COLORS["positive"] if sentiment == "Positive" else COLORS["negative"] if sentiment == "Negative" else COLORS["neutral"]};'>
-                        {sentiment}
+                        {sentiment if sentiment is not None else "Unavailable"}
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -135,7 +164,7 @@ def main():
                 '>
                     <h3 style='color: {COLORS['primary']}; margin-top: 0;'>Product Category</h3>
                     <p style='font-size: 24px; font-weight: bold; color: {COLORS['text']};'>
-                        {category}
+                        {category if category is not None else "Unavailable"}
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -151,7 +180,7 @@ def main():
                 '>
                     <h3 style='color: {COLORS['primary']}; margin-top: 0;'>Review Type</h3>
                     <p style='font-size: 24px; font-weight: bold; color: {COLORS['text']};'>
-                        {review_type}
+                        {review_type if review_type is not None else "Unavailable"}
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -162,33 +191,41 @@ def main():
             
             # Create expanders for different analysis types
             with st.expander("Review Type Reason", expanded=False):
-                keywords = get_top_keywords(
-                    review, 
-                    models['review_keywords'], 
-                    review_type
-                )
-                
-                st.markdown(f"""
-                <div class="analysis-box">
-                    <h4>Why this is classified as {review_type}:</h4>
-                    {f"<p><strong>Matching keywords:</strong> {', '.join(keywords)}</p>" if keywords else "<p>No specific keywords detected (classified as general feedback)</p>"}
-                    <p><strong>Cleaned text used for analysis:</strong></p>
-                    <p style='background: #f5f5f5; padding: 10px; border-radius: 4px;'>{cleaned_text}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                if review_type is not None and models.get('review_keywords') is not None:
+                    keywords = get_top_keywords(
+                        review,
+                        models['review_keywords'],
+                        review_type
+                    )
+                    st.markdown(f"""
+                    <div class="analysis-box">
+                        <h4>Why this is classified as {review_type}:</h4>
+                        {f"<p><strong>Matching keywords:</strong> {', '.join(keywords)}</p>" if keywords else "<p>No specific keywords detected (classified as general feedback)</p>"}
+                        <p><strong>Cleaned text used for analysis:</strong></p>
+                        <p style='background: #f5f5f5; padding: 10px; border-radius: 4px;'>{cleaned_text}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("Review type explanation is unavailable (missing model or keywords mapping).")
             
             with st.expander("Product Category Info", expanded=False):
-                # Get the topic number for this category
-                topic_num = [k for k, v in models['topic_mapping'].items() if v == category][0]
-                
-                st.markdown(f"""
-                <div class="analysis-box">
-                    <h4>About {category} category:</h4>
-                    <p><strong>Topic Number:</strong> {topic_num}</p>
-                    <p><strong>Common terms in this category:</strong></p>
-                    <p>Note: Add your category keywords here based on your LDA analysis</p>
-                </div>
-                """, unsafe_allow_html=True)
+                if category is not None and models.get('topic_mapping') is not None:
+                    try:
+                        topic_candidates = [k for k, v in models['topic_mapping'].items() if v == category]
+                        topic_num = topic_candidates[0] if topic_candidates else "N/A"
+                    except Exception:
+                        topic_num = "N/A"
+
+                    st.markdown(f"""
+                    <div class="analysis-box">
+                        <h4>About {category} category:</h4>
+                        <p><strong>Topic Number:</strong> {topic_num}</p>
+                        <p><strong>Common terms in this category:</strong></p>
+                        <p>Note: Add your category keywords here based on your LDA analysis</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("Product category details are unavailable (missing model or mapping).")
 
 if __name__ == "__main__":
     main()
